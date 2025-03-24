@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
 import ThemeToggle from "@/components/ThemeToggle";
 import BotControls from "@/components/BotControls";
@@ -10,7 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 
 export default function ControlPanel() {
   const [, setLocation] = useLocation();
-  const { socket } = useWebSocket();
+  const { socket, connectionStatus, disconnect } = useWebSocket();
   const { toast } = useToast();
   const [botInfo, setBotInfo] = useState<BotInfo>({
     name: "Unknown",
@@ -21,16 +21,88 @@ export default function ControlPanel() {
   });
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [activeMobileTab, setActiveMobileTab] = useState<'controls' | 'chat'>('controls');
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const infoRequestIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
   // Initialize keyboard controls
   const { handleKeyDown, handleKeyUp } = useKeyboardControls((action) => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: 'control', action }));
-    }
+    sendControlAction(action);
   });
 
+  // Function to safely send messages over WebSocket
+  const safeSendMessage = useCallback((data: any) => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      try {
+        socket.send(JSON.stringify(data));
+        return true;
+      } catch (error) {
+        console.error("Error sending message:", error);
+        return false;
+      }
+    }
+    return false;
+  }, [socket]);
+
+  // Request bot information periodically
+  const setupInfoRequests = useCallback(() => {
+    // Clear any existing interval
+    if (infoRequestIntervalRef.current) {
+      clearInterval(infoRequestIntervalRef.current);
+    }
+    
+    // Request bot info immediately
+    safeSendMessage({ type: 'getBotInfo' });
+    
+    // Set up interval to request info every few seconds
+    infoRequestIntervalRef.current = setInterval(() => {
+      if (!safeSendMessage({ type: 'getBotInfo' })) {
+        // If sending fails, clear the interval
+        if (infoRequestIntervalRef.current) {
+          clearInterval(infoRequestIntervalRef.current);
+          infoRequestIntervalRef.current = null;
+        }
+      }
+    }, 3000); // Request every 3 seconds
+  }, [safeSendMessage]);
+
+  // Effect to monitor connection status
   useEffect(() => {
-    // Check if socket exists and is connected
+    if (connectionStatus === 'disconnected' && !isReconnecting) {
+      toast({
+        title: "Connection Lost",
+        description: "Connection to server lost. Redirecting to home.",
+        variant: "destructive"
+      });
+      
+      // Clear any ongoing info requests
+      if (infoRequestIntervalRef.current) {
+        clearInterval(infoRequestIntervalRef.current);
+        infoRequestIntervalRef.current = null;
+      }
+      
+      // Redirect to home after a short delay
+      setTimeout(() => setLocation('/'), 2000);
+    } else if (connectionStatus.includes('reconnecting')) {
+      setIsReconnecting(true);
+      toast({
+        title: "Reconnecting",
+        description: "Connection lost. Attempting to reconnect..."
+      });
+    } else if (connectionStatus === 'connected' && isReconnecting) {
+      setIsReconnecting(false);
+      toast({
+        title: "Reconnected",
+        description: "Connection reestablished!"
+      });
+      
+      // Re-setup info requests
+      setupInfoRequests();
+    }
+  }, [connectionStatus, isReconnecting, setLocation, toast, setupInfoRequests]);
+
+  // Main WebSocket effect
+  useEffect(() => {
+    // Check if socket exists
     if (!socket) {
       toast({
         title: "Connection Error",
@@ -52,6 +124,13 @@ export default function ControlPanel() {
             break;
           case 'chat':
             setChatMessages(prev => [...prev, data.message]);
+            // Auto-scroll chat to bottom (via timeout to ensure rendering)
+            setTimeout(() => {
+              const chatContainer = document.querySelector('.chat-messages');
+              if (chatContainer) {
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+              }
+            }, 50);
             break;
           case 'error':
             toast({
@@ -59,6 +138,12 @@ export default function ControlPanel() {
               description: data.message,
               variant: "destructive"
             });
+            // If it's a fatal error, redirect to home
+            if (data.message.includes("disconnected") || 
+                data.message.includes("timed out") || 
+                data.message.includes("kicked")) {
+              setTimeout(() => setLocation('/'), 2000);
+            }
             break;
           case 'disconnected':
             toast({
@@ -67,65 +152,80 @@ export default function ControlPanel() {
             });
             setLocation('/');
             break;
+          case 'pong':
+            // Server responded to ping, connection is alive
+            console.log("Received pong from server");
+            break;
         }
       } catch (error) {
         console.error("Error parsing websocket message:", error);
       }
     };
 
+    // Add event listeners
     socket.addEventListener('message', handleMessage);
-    
-    // Setup event listeners for keyboard controls
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
 
-    // Request bot information once connected
-    if (socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: 'getBotInfo' }));
-    }
+    // Setup periodic bot info requests
+    setupInfoRequests();
 
     // Cleanup function
     return () => {
       socket.removeEventListener('message', handleMessage);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+      
+      if (infoRequestIntervalRef.current) {
+        clearInterval(infoRequestIntervalRef.current);
+        infoRequestIntervalRef.current = null;
+      }
     };
-  }, [socket, setLocation, toast, handleKeyDown, handleKeyUp]);
+  }, [socket, setLocation, toast, handleKeyDown, handleKeyUp, safeSendMessage, setupInfoRequests]);
 
+  // Handle user-initiated disconnect
   const handleDisconnect = () => {
     if (window.confirm('Are you sure you want to disconnect?')) {
       if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: 'disconnect' }));
+        safeSendMessage({ type: 'disconnect' });
       }
+      
+      // Clean up interval
+      if (infoRequestIntervalRef.current) {
+        clearInterval(infoRequestIntervalRef.current);
+        infoRequestIntervalRef.current = null;
+      }
+      
+      // Disconnect WebSocket and redirect
+      disconnect();
       setLocation('/');
     }
   };
 
+  // Send chat message to server
   const sendChatMessage = (message: string) => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({
-        type: 'chat',
-        message
-      }));
-    }
+    safeSendMessage({
+      type: 'chat',
+      message
+    });
   };
 
+  // Send control action to server
+  const sendControlAction = (action: string) => {
+    safeSendMessage({
+      type: 'control',
+      action
+    });
+  };
+
+  // Handle movement controls
   const handleMoveControl = (direction: string) => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({
-        type: 'control',
-        action: direction
-      }));
-    }
+    sendControlAction(direction);
   };
 
+  // Handle action controls (jump, attack, etc.)
   const handleAction = (action: string) => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({
-        type: 'control',
-        action
-      }));
-    }
+    sendControlAction(action);
   };
 
   return (

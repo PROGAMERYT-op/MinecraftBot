@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Send } from "lucide-react";
+import { Send, Clock } from "lucide-react";
 import { ChatMessage } from "@/lib/types";
 
 interface ChatPanelProps {
@@ -14,6 +14,7 @@ interface ChatPanelProps {
 export default function ChatPanel({ messages, onSendMessage, botName }: ChatPanelProps) {
   const [inputValue, setInputValue] = useState("");
   const chatHistoryRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -22,11 +23,25 @@ export default function ChatPanel({ messages, onSendMessage, botName }: ChatPane
     }
   }, [messages]);
 
+  // Format timestamps for chat messages
+  const formatTimestamp = (timestamp?: number) => {
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (inputValue.trim()) {
       onSendMessage(inputValue.trim());
       setInputValue("");
+      
+      // Focus the input field after sending
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.focus();
+        }
+      }, 0);
     }
   };
 
@@ -37,10 +52,11 @@ export default function ChatPanel({ messages, onSendMessage, botName }: ChatPane
         
         <div 
           ref={chatHistoryRef}
-          className="flex-1 overflow-y-auto mb-4 pr-1 custom-scrollbar"
+          className="flex-1 overflow-y-auto mb-4 pr-1 custom-scrollbar chat-messages"
           style={{ 
             scrollbarWidth: 'thin',
-            scrollbarColor: 'rgba(0, 0, 0, 0.3) rgba(0, 0, 0, 0.1)'
+            scrollbarColor: 'rgba(0, 0, 0, 0.3) rgba(0, 0, 0, 0.1)',
+            maxHeight: 'calc(70vh - 100px)'
           }}
         >
           <div className="space-y-2">
@@ -54,18 +70,28 @@ export default function ChatPanel({ messages, onSendMessage, botName }: ChatPane
                   key={index} 
                   className="px-3 py-1.5 text-sm rounded bg-gray-100 dark:bg-gray-700"
                 >
-                  <span 
-                    className={`font-medium ${
-                      msg.username === botName 
-                        ? 'text-[#4CAF50]' 
-                        : msg.username === 'SERVER' 
+                  <div className="flex justify-between items-start">
+                    <span 
+                      className={`font-medium ${
+                        msg.username === botName 
                           ? 'text-[#4CAF50]' 
-                          : 'text-blue-500'
-                    }`}
-                  >
-                    {msg.username === botName ? `[${msg.username}]` : msg.username}
-                  </span>
-                  : {msg.content}
+                          : msg.username === 'SERVER' 
+                            ? 'text-[#4CAF50]' 
+                            : 'text-blue-500'
+                      }`}
+                    >
+                      {msg.username === botName ? `[${msg.username}]` : msg.username}
+                    </span>
+                    {msg.timestamp && (
+                      <span className="text-xs text-gray-500 dark:text-gray-400 ml-1 mt-0.5 flex items-center">
+                        <Clock className="w-3 h-3 mr-1" />
+                        {formatTimestamp(msg.timestamp)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-0.5">
+                    {msg.content}
+                  </div>
                 </div>
               ))
             )}
