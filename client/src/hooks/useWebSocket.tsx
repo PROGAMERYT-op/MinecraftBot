@@ -81,13 +81,30 @@ export const WebSocketProvider = ({ children }: WebSocketProviderProps) => {
     const wsUrl = `${protocol}//${window.location.host}/ws`;
     console.log(`Connecting to WebSocket at ${wsUrl}`);
     
+    // Declare outside try-catch so we can access in all handlers
+    let newSocket: WebSocket | null = null;
+    let connectionTimeout: NodeJS.Timeout | null = null;
+    
+    // Function to clean up resources
+    const cleanUp = () => {
+      if (connectionTimeout) {
+        clearTimeout(connectionTimeout);
+        connectionTimeout = null;
+      }
+      
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current);
+        pingIntervalRef.current = null;
+      }
+    };
+    
     try {
-      const newSocket = new WebSocket(wsUrl);
+      newSocket = new WebSocket(wsUrl);
       
       // Setup a connection timeout
-      const connectionTimeout = setTimeout(() => {
+      connectionTimeout = setTimeout(() => {
         console.error('WebSocket connection timeout');
-        if (newSocket.readyState === WebSocket.CONNECTING) {
+        if (newSocket && newSocket.readyState === WebSocket.CONNECTING) {
           newSocket.close();
           setConnectionStatus('timeout');
           setIsConnecting(false);
@@ -96,28 +113,44 @@ export const WebSocketProvider = ({ children }: WebSocketProviderProps) => {
             connectPromiseRef.current = null;
           }
         }
+        connectionTimeout = null;
       }, 10000); // 10 seconds timeout
 
       newSocket.onopen = () => {
         console.log('WebSocket connected successfully');
-        clearTimeout(connectionTimeout);
+        cleanUp(); // Clear timeout
         setSocket(newSocket);
         setIsConnecting(false);
         setConnectionStatus('connected');
         reconnectAttemptsRef.current = 0;
         
         // Setup ping interval to keep connection alive
-        setupPingInterval(newSocket);
+        if (newSocket) {
+          setupPingInterval(newSocket);
+        }
         
         if (connectPromiseRef.current) {
-          connectPromiseRef.current.resolve(newSocket);
+          connectPromiseRef.current.resolve(newSocket!);
           connectPromiseRef.current = null;
         }
       };
 
       newSocket.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data);
+          // Check if the socket has been garbage collected or is no longer valid
+          if (!newSocket || newSocket.readyState !== WebSocket.OPEN) {
+            console.warn('Received message on invalid socket');
+            return;
+          }
+          
+          let data;
+          try {
+            data = JSON.parse(event.data);
+          } catch (parseError) {
+            console.error('Error parsing WebSocket message:', parseError);
+            return;
+          }
+          
           console.log('Received websocket message:', data);
           
           // Handle ping/pong messages for connection keepalive
@@ -126,16 +159,20 @@ export const WebSocketProvider = ({ children }: WebSocketProviderProps) => {
             console.log('Received pong from server');
           } else if (data.type === 'ping') {
             // Server sent a ping, respond with pong
-            newSocket.send(JSON.stringify({ type: 'pong' }));
+            try {
+              newSocket.send(JSON.stringify({ type: 'pong' }));
+            } catch (sendError) {
+              console.error('Error sending pong response:', sendError);
+            }
           }
         } catch (e) {
-          console.error('Error parsing WebSocket message:', e);
+          console.error('Error handling WebSocket message:', e);
         }
       };
 
       newSocket.onerror = (error) => {
         console.error('WebSocket connection error:', error);
-        clearTimeout(connectionTimeout);
+        cleanUp(); // Clear timeout and intervals
         setConnectionStatus('error');
         setIsConnecting(false);
         
@@ -147,6 +184,7 @@ export const WebSocketProvider = ({ children }: WebSocketProviderProps) => {
 
       newSocket.onclose = (event) => {
         console.log('WebSocket connection closed:', event.code, event.reason);
+        cleanUp(); // Clear timeout and intervals
         setSocket(null);
         setConnectionStatus('disconnected');
         
@@ -156,14 +194,12 @@ export const WebSocketProvider = ({ children }: WebSocketProviderProps) => {
           connectPromiseRef.current = null;
         }
         
-        // Clean up ping interval
-        if (pingIntervalRef.current) {
-          clearInterval(pingIntervalRef.current);
-          pingIntervalRef.current = null;
-        }
-        
         // Auto-reconnect logic for abnormal closures (not if intentionally closed)
-        if (event.code === 1006 || event.code === 1012 || event.code === 1013) { // Abnormal closure or server restart
+        const isAbnormalClosure = event.code === 1006 || event.code === 1012 || event.code === 1013;
+        const isServerError = event.code === 1011;
+        const shouldReconnect = isAbnormalClosure || isServerError;
+        
+        if (shouldReconnect) {
           if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
             reconnectAttemptsRef.current++;
             console.log(`Attempting to reconnect (${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})...`);
@@ -172,14 +208,23 @@ export const WebSocketProvider = ({ children }: WebSocketProviderProps) => {
             // Exponential backoff with a bit of randomness to prevent thundering herd
             const baseDelay = RECONNECT_INTERVAL * Math.pow(1.5, reconnectAttemptsRef.current - 1);
             const jitter = Math.random() * 1000; // Add up to 1 second of jitter
-            const delay = baseDelay + jitter;
+            const delay = Math.min(baseDelay + jitter, 30000); // Cap at 30 seconds
             
             try {
+              // Use a wrapped timeout to catch any errors in the callback
               reconnectTimeoutRef.current = setTimeout(() => {
-                createWebSocketConnection();
+                try {
+                  createWebSocketConnection();
+                } catch (reconnectError) {
+                  console.error('Error during reconnection attempt:', reconnectError);
+                  setConnectionStatus('error');
+                  setIsConnecting(false);
+                }
               }, delay);
-            } catch (error) {
-              console.error('Error setting reconnect timeout:', error);
+            } catch (timeoutError) {
+              console.error('Error setting reconnect timeout:', timeoutError);
+              setConnectionStatus('error');
+              setIsConnecting(false);
             }
           } else {
             console.error('Maximum reconnection attempts reached');
@@ -189,6 +234,7 @@ export const WebSocketProvider = ({ children }: WebSocketProviderProps) => {
       };
     } catch (error) {
       console.error('Error creating WebSocket:', error);
+      cleanUp(); // Ensure we clean up resources
       setIsConnecting(false);
       setConnectionStatus('error');
       if (connectPromiseRef.current) {
@@ -196,6 +242,21 @@ export const WebSocketProvider = ({ children }: WebSocketProviderProps) => {
         connectPromiseRef.current = null;
       }
     }
+    
+    // Return a cleanup function to properly handle component unmount during connection
+    return () => {
+      if (connectionTimeout) {
+        clearTimeout(connectionTimeout);
+      }
+      
+      if (newSocket && (newSocket.readyState === WebSocket.CONNECTING || newSocket.readyState === WebSocket.OPEN)) {
+        try {
+          newSocket.close(1000, 'Component unmounted');
+        } catch (error) {
+          console.error('Error closing socket during cleanup:', error);
+        }
+      }
+    };
   }, [isConnecting, setupPingInterval]);
 
   const connect = useCallback(() => {

@@ -6,7 +6,8 @@ import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
 import ControlPanel from "@/pages/ControlPanel";
 import { WebSocketProvider } from "@/hooks/useWebSocket";
-import { ThemeProvider } from "./lib/themeContext"; // Fixed ThemeProvider import
+import { ThemeProvider } from "./lib/themeContext";
+import ErrorBoundary from "@/components/ErrorBoundary";
 
 function Router() {
   return (
@@ -20,14 +21,16 @@ function Router() {
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <ThemeProvider>
-        <WebSocketProvider>
-          <Router />
-          <Toaster />
-        </WebSocketProvider>
-      </ThemeProvider>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider>
+          <WebSocketProvider>
+            <Router />
+            <Toaster />
+          </WebSocketProvider>
+        </ThemeProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }
 

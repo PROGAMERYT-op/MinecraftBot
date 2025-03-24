@@ -91,6 +91,16 @@ export default function Home() {
     setLocalConnectionStatus("Establishing WebSocket connection...");
     
     try {
+      // First check if the server URL looks valid
+      const serverParts = details.serverIp.split(':');
+      if (serverParts.length > 1) {
+        const port = parseInt(serverParts[1], 10);
+        if (isNaN(port) || port < 1 || port > 65535) {
+          throw new Error("Invalid server port. Port must be between 1 and 65535.");
+        }
+      }
+      
+      // Try to connect to the WebSocket server
       const webSocket = await connect();
       
       try {
@@ -99,8 +109,24 @@ export default function Home() {
           type: 'connect',
           data: details
         }));
+        
+        // Set a timeout to check if we get a response from the server
+        const connectionResponseTimeout = setTimeout(() => {
+          if (showConnectionScreen) {
+            setLocalConnectionStatus("Server is taking longer than expected to respond. This may indicate the Minecraft server is offline or starting up.");
+          }
+        }, 10000); // 10 seconds
+        
+        // Clean up timeout if component unmounts
+        return () => clearTimeout(connectionResponseTimeout);
+        
       } catch (sendError) {
         console.error("Error sending connection details:", sendError);
+        toast({
+          title: "Connection Error",
+          description: "Connected to WebSocket server but failed to send connection details",
+          variant: "destructive"
+        });
         throw new Error("Failed to send connection details to server");
       }
       
@@ -108,14 +134,30 @@ export default function Home() {
       console.error("WebSocket connection failed:", error);
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
       setLocalConnectionStatus(`Connection error: ${errorMessage}`);
+      
+      // Provide more user-friendly error messages
+      let userMessage = "Could not establish connection";
+      
+      if (errorMessage.includes("timeout")) {
+        userMessage = "Connection timed out. The server might be unavailable.";
+      } else if (errorMessage.includes("port")) {
+        userMessage = "Invalid server address or port number. Please check and try again.";
+      } else if (errorMessage.includes("Failed to send")) {
+        userMessage = "Connection established but failed to communicate with server.";
+      }
+      
       toast({
         title: "Connection Failed",
-        description: errorMessage.includes("Failed to send") 
-          ? "Connection established but failed to send data to server" 
-          : "Could not establish WebSocket connection",
+        description: userMessage,
         variant: "destructive"
       });
-      setTimeout(() => setShowConnectionScreen(false), 3000);
+      
+      // Return to form after a delay
+      setTimeout(() => {
+        if (showConnectionScreen) {
+          setShowConnectionScreen(false);
+        }
+      }, 5000);
     }
   };
 
