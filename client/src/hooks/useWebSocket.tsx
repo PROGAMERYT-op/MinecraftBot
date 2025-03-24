@@ -150,6 +150,12 @@ export const WebSocketProvider = ({ children }: WebSocketProviderProps) => {
         setSocket(null);
         setConnectionStatus('disconnected');
         
+        // Resolve or reject any pending promises to prevent unhandled rejections
+        if (connectPromiseRef.current) {
+          connectPromiseRef.current.reject(new Error(`WebSocket closed with code ${event.code}`));
+          connectPromiseRef.current = null;
+        }
+        
         // Clean up ping interval
         if (pingIntervalRef.current) {
           clearInterval(pingIntervalRef.current);
@@ -157,24 +163,27 @@ export const WebSocketProvider = ({ children }: WebSocketProviderProps) => {
         }
         
         // Auto-reconnect logic for abnormal closures (not if intentionally closed)
-        if (event.code === 1006) { // Abnormal closure
+        if (event.code === 1006 || event.code === 1012 || event.code === 1013) { // Abnormal closure or server restart
           if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
             reconnectAttemptsRef.current++;
             console.log(`Attempting to reconnect (${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})...`);
             setConnectionStatus(`reconnecting (${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})`);
             
-            // Exponential backoff
-            const delay = RECONNECT_INTERVAL * Math.pow(1.5, reconnectAttemptsRef.current - 1);
-            reconnectTimeoutRef.current = setTimeout(() => {
-              createWebSocketConnection();
-            }, delay);
+            // Exponential backoff with a bit of randomness to prevent thundering herd
+            const baseDelay = RECONNECT_INTERVAL * Math.pow(1.5, reconnectAttemptsRef.current - 1);
+            const jitter = Math.random() * 1000; // Add up to 1 second of jitter
+            const delay = baseDelay + jitter;
+            
+            try {
+              reconnectTimeoutRef.current = setTimeout(() => {
+                createWebSocketConnection();
+              }, delay);
+            } catch (error) {
+              console.error('Error setting reconnect timeout:', error);
+            }
           } else {
             console.error('Maximum reconnection attempts reached');
             setConnectionStatus('max_reconnect_attempts');
-            if (connectPromiseRef.current) {
-              connectPromiseRef.current.reject(new Error('Maximum reconnection attempts reached'));
-              connectPromiseRef.current = null;
-            }
           }
         }
       };
@@ -191,25 +200,35 @@ export const WebSocketProvider = ({ children }: WebSocketProviderProps) => {
 
   const connect = useCallback(() => {
     return new Promise<WebSocket>((resolve, reject) => {
-      // Close existing connection if any
-      if (socket) {
-        socket.close();
+      try {
+        // Close existing connection if any
+        if (socket) {
+          socket.close();
+        }
+        
+        // Stop any pending reconnection attempts
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+          reconnectTimeoutRef.current = null;
+        }
+        
+        // Reset reconnect attempts
+        reconnectAttemptsRef.current = 0;
+        
+        // Store the promise callbacks
+        connectPromiseRef.current = { resolve, reject };
+        
+        // Create a new connection
+        createWebSocketConnection();
+      } catch (error) {
+        console.error('Error in connect method:', error);
+        reject(error);
+        connectPromiseRef.current = null;
       }
-      
-      // Stop any pending reconnection attempts
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = null;
-      }
-      
-      // Reset reconnect attempts
-      reconnectAttemptsRef.current = 0;
-      
-      // Store the promise callbacks
-      connectPromiseRef.current = { resolve, reject };
-      
-      // Create a new connection
-      createWebSocketConnection();
+    }).catch(error => {
+      // Add global catch to ensure no unhandled rejections
+      console.error('Unhandled WebSocket connection error:', error);
+      throw error; // Re-throw so caller can handle if needed
     });
   }, [socket, createWebSocketConnection]);
 

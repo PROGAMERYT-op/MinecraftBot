@@ -93,18 +93,26 @@ export default function Home() {
     try {
       const webSocket = await connect();
       
-      // Send connection details to server
-      webSocket.send(JSON.stringify({
-        type: 'connect',
-        data: details
-      }));
+      try {
+        // Send connection details to server
+        webSocket.send(JSON.stringify({
+          type: 'connect',
+          data: details
+        }));
+      } catch (sendError) {
+        console.error("Error sending connection details:", sendError);
+        throw new Error("Failed to send connection details to server");
+      }
       
     } catch (error) {
       console.error("WebSocket connection failed:", error);
-      setLocalConnectionStatus("Failed to establish WebSocket connection. Please try again.");
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      setLocalConnectionStatus(`Connection error: ${errorMessage}`);
       toast({
         title: "Connection Failed",
-        description: "Could not establish WebSocket connection",
+        description: errorMessage.includes("Failed to send") 
+          ? "Connection established but failed to send data to server" 
+          : "Could not establish WebSocket connection",
         variant: "destructive"
       });
       setTimeout(() => setShowConnectionScreen(false), 3000);
@@ -112,6 +120,10 @@ export default function Home() {
   };
 
   const cancelConnection = () => {
+    // First update the UI state
+    setLocalConnectionStatus("Cancelling connection...");
+    
+    // Try to send a cancel message if the socket is available
     if (socket && socket.readyState === WebSocket.OPEN) {
       try {
         socket.send(JSON.stringify({
@@ -119,12 +131,23 @@ export default function Home() {
         }));
       } catch (error) {
         console.error("Error sending cancel message:", error);
+        toast({
+          title: "Warning",
+          description: "Could not send cancel message to server, but connection will be closed locally",
+          variant: "warning"
+        });
       }
     }
     
-    // Disconnect the WebSocket
-    disconnect();
-    setShowConnectionScreen(false);
+    // Disconnect the WebSocket regardless of whether the message was sent
+    try {
+      disconnect();
+    } catch (error) {
+      console.error("Error disconnecting WebSocket:", error);
+    } finally {
+      // Always update UI state
+      setShowConnectionScreen(false);
+    }
   };
 
   return (
