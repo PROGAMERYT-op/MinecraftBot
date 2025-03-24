@@ -105,7 +105,10 @@ export class MinecraftBotManager {
 
       bot.on('message', (message) => {
         const msgText = message.toString();
-        const username = message.username || 'SERVER';
+        // Handle username extraction safely - mineflayer types can be complex
+        const username = message.hasOwnProperty('username') 
+          ? (message as any).username 
+          : 'SERVER';
         
         // Add message to chat history
         const chatMessage = {

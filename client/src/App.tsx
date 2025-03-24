@@ -6,6 +6,7 @@ import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
 import ControlPanel from "@/pages/ControlPanel";
 import { WebSocketProvider } from "@/hooks/useWebSocket";
+import { ThemeProvider } from "./lib/theme";
 
 function Router() {
   return (
@@ -20,10 +21,12 @@ function Router() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <WebSocketProvider>
-        <Router />
-        <Toaster />
-      </WebSocketProvider>
+      <ThemeProvider>
+        <WebSocketProvider>
+          <Router />
+          <Toaster />
+        </WebSocketProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }
