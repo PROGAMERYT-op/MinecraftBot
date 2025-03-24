@@ -78,131 +78,15 @@ export class MinecraftBotManager {
         host: server,
         port,
         username: botName,
-        version: '1.20.1', // Default to latest version, could be configurable
+        version: '1.21.4', // Latest Minecraft version
         auth: 'offline', // For connecting to offline-mode servers
         viewDistance: 'tiny', // For performance
         checkTimeoutInterval: 60 * 1000, // 1 minute timeout
         logErrors: true 
       });
-
-      // Set up event handlers
-      bot.once('spawn', () => {
-        console.log(`Bot ${botName} has spawned successfully on ${server}:${port}`);
-        this.sendToClient(clientId, {
-          type: 'connected'
-        });
-        
-        storage.updateBot(newBot.id, { connected: true });
-      });
       
-      // Add more detailed error handling
-      bot.once('login', () => {
-        console.log(`Bot ${botName} logged in to ${server}:${port}`);
-      });
-      
-      bot.on('end', (reason) => {
-        console.log(`Bot ${botName} disconnected: ${reason}`);
-        this.sendToClient(clientId, {
-          type: 'error',
-          message: `Bot disconnected: ${reason}`
-        });
-        this.disconnectBot(botId);
-      });
-      
-      // Add timeout handling in case connection takes too long
-      const connectionTimeout = setTimeout(() => {
-        if (this.activeBots.has(botId) && !bot.entity) {
-          console.log(`Connection timeout for bot ${botName} to ${server}:${port}`);
-          this.sendToClient(clientId, {
-            type: 'error',
-            message: 'Connection timed out. Please check the server address and try again.'
-          });
-          this.disconnectBot(botId);
-        }
-      }, 30000); // 30 seconds timeout
-      
-      // Clear timeout when bot spawns or encounters an error
-      bot.once('spawn', () => clearTimeout(connectionTimeout));
-      bot.once('error', () => clearTimeout(connectionTimeout));
-
-      bot.on('health', () => {
-        if (this.activeBots.has(botId)) {
-          const activeBot = this.activeBots.get(botId)!;
-          activeBot.health = bot.health;
-          activeBot.food = bot.food;
-          
-          // Update database
-          storage.updateBot(newBot.id, { 
-            health: Math.round(bot.health),
-            food: Math.round(bot.food)
-          });
-          
-          // Send updated info to client
-          this.sendToClient(clientId, {
-            type: 'botInfo',
-            data: {
-              name: activeBot.name,
-              count: 1, // Currently we create bots one at a time
-              serverIp: serverAddress,
-              health: bot.health,
-              food: bot.food
-            }
-          });
-        }
-      });
-
-      bot.on('message', (message) => {
-        const msgText = message.toString();
-        // Handle username extraction safely - mineflayer types can be complex
-        const username = message.hasOwnProperty('username') 
-          ? (message as any).username 
-          : 'SERVER';
-        
-        // Add message to chat history
-        const chatMessage = {
-          username,
-          content: msgText,
-          timestamp: Date.now()
-        };
-        
-        if (this.activeBots.has(botId)) {
-          const activeBot = this.activeBots.get(botId)!;
-          activeBot.chatMessages.push(chatMessage);
-          
-          // Limit chat history to 100 messages
-          if (activeBot.chatMessages.length > 100) {
-            activeBot.chatMessages.shift();
-          }
-        }
-        
-        // Send to client
-        this.sendToClient(clientId, {
-          type: 'chat',
-          message: chatMessage
-        });
-      });
-
-      bot.on('kicked', (reason) => {
-        this.sendToClient(clientId, {
-          type: 'error',
-          message: `Kicked from server: ${reason}`
-        });
-        
-        this.disconnectBot(botId);
-      });
-
-      bot.on('error', (err) => {
-        console.error('Bot error:', err);
-        this.sendToClient(clientId, {
-          type: 'error',
-          message: `Bot error: ${err.message}`
-        });
-        
-        this.disconnectBot(botId);
-      });
-
       // Store the active bot
-      this.activeBots.set(botId, {
+      const activeBot: ActiveBot = {
         id: newBot.id,
         name: botName,
         bot,
@@ -212,7 +96,12 @@ export class MinecraftBotManager {
         health: 20,
         food: 20,
         chatMessages: []
-      });
+      };
+      
+      this.activeBots.set(botId, activeBot);
+      
+      // Set up event handlers
+      this.setupBotEventHandlers(bot, botId, clientId, activeBot);
 
       return botId;
     } catch (error) {
@@ -328,6 +217,178 @@ export class MinecraftBotManager {
     if (socket && socket.readyState === 1) { // 1 = OPEN state for WebSocket
       socket.send(JSON.stringify(data));
     }
+  }
+  
+  private setupBotEventHandlers(
+    bot: mineflayer.Bot, 
+    botId: string, 
+    clientId: string, 
+    activeBot: ActiveBot
+  ) {
+    // Clear existing timeout if any
+    let connectionTimeout: NodeJS.Timeout;
+    
+    // Set up event handlers
+    bot.once('spawn', () => {
+      console.log(`Bot ${activeBot.name} has spawned successfully on ${activeBot.server}:${activeBot.port}`);
+      this.sendToClient(clientId, {
+        type: 'connected'
+      });
+      
+      storage.updateBot(activeBot.id, { connected: true });
+      
+      // Clear timeout when bot spawns
+      if (connectionTimeout) clearTimeout(connectionTimeout);
+    });
+    
+    bot.once('login', () => {
+      console.log(`Bot ${activeBot.name} logged in to ${activeBot.server}:${activeBot.port}`);
+    });
+    
+    bot.on('end', (reason) => {
+      console.log(`Bot ${activeBot.name} disconnected: ${reason}`);
+      this.sendToClient(clientId, {
+        type: 'error',
+        message: `Bot disconnected: ${reason}`
+      });
+      this.disconnectBot(botId);
+    });
+    
+    // Add timeout handling in case connection takes too long
+    connectionTimeout = setTimeout(() => {
+      if (this.activeBots.has(botId) && !bot.entity) {
+        console.log(`Connection timeout for bot ${activeBot.name} to ${activeBot.server}:${activeBot.port}`);
+        this.sendToClient(clientId, {
+          type: 'error',
+          message: 'Connection timed out. Please check the server address and try again.'
+        });
+        this.disconnectBot(botId);
+      }
+    }, 30000); // 30 seconds timeout
+    
+    // Clear timeout when bot encounters an error
+    bot.once('error', () => {
+      if (connectionTimeout) clearTimeout(connectionTimeout);
+    });
+
+    bot.on('health', () => {
+      if (this.activeBots.has(botId)) {
+        activeBot.health = bot.health;
+        activeBot.food = bot.food;
+        
+        // Update database
+        storage.updateBot(activeBot.id, { 
+          health: Math.round(bot.health),
+          food: Math.round(bot.food)
+        });
+        
+        // Send updated info to client
+        this.sendToClient(clientId, {
+          type: 'botInfo',
+          data: {
+            name: activeBot.name,
+            count: 1, // Currently we create bots one at a time
+            serverIp: `${activeBot.server}:${activeBot.port}`,
+            health: bot.health,
+            food: bot.food
+          }
+        });
+      }
+    });
+
+    bot.on('message', (message) => {
+      const msgText = message.toString();
+      // Handle username extraction safely
+      const username = message.hasOwnProperty('username') 
+        ? (message as any).username 
+        : 'SERVER';
+      
+      // Add message to chat history
+      const chatMessage = {
+        username,
+        content: msgText,
+        timestamp: Date.now()
+      };
+      
+      if (this.activeBots.has(botId)) {
+        activeBot.chatMessages.push(chatMessage);
+        
+        // Limit chat history to 100 messages
+        if (activeBot.chatMessages.length > 100) {
+          activeBot.chatMessages.shift();
+        }
+      }
+      
+      // Send to client
+      this.sendToClient(clientId, {
+        type: 'chat',
+        message: chatMessage
+      });
+    });
+
+    bot.on('kicked', (reason) => {
+      this.sendToClient(clientId, {
+        type: 'error',
+        message: `Kicked from server: ${reason}`
+      });
+      
+      this.disconnectBot(botId);
+    });
+
+    bot.on('error', (err) => {
+      console.error('Bot error:', err);
+      
+      // Special handling for version mismatch errors
+      if (err.message && err.message.includes('version')) {
+        const versionMatch = err.message.match(/version ([0-9.]+)/);
+        if (versionMatch && versionMatch[1]) {
+          const serverVersion = versionMatch[1];
+          
+          this.sendToClient(clientId, {
+            type: 'error',
+            message: `Version mismatch. Server is running ${serverVersion}. Attempting to reconnect with the correct version...`
+          });
+          
+          // Try to reconnect with the detected version
+          try {
+            bot.end();
+            
+            // Create a new bot with the correct version
+            setTimeout(() => {
+              const newBot = mineflayer.createBot({
+                host: activeBot.server,
+                port: activeBot.port,
+                username: activeBot.name,
+                version: serverVersion,
+                auth: 'offline',
+                viewDistance: 'tiny',
+                checkTimeoutInterval: 60 * 1000,
+                logErrors: true
+              });
+              
+              // Replace the old bot in the active bots map
+              if (this.activeBots.has(botId)) {
+                activeBot.bot = newBot;
+                
+                // Re-register all the event handlers
+                this.setupBotEventHandlers(newBot, botId, clientId, activeBot);
+              }
+            }, 1000);
+            
+            return;
+          } catch (reconnectError) {
+            console.error('Error reconnecting with correct version:', reconnectError);
+          }
+        }
+      }
+      
+      this.sendToClient(clientId, {
+        type: 'error',
+        message: `Bot error: ${err.message}`
+      });
+      
+      this.disconnectBot(botId);
+    });
   }
 }
 

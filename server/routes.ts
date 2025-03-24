@@ -13,25 +13,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const wss = new WebSocketServer({ 
     server: httpServer, 
     path: '/ws',
-    // Enable automatic pings to keep connections alive
-    clientTracking: true,
-    // Keep connections alive with pings
-    perMessageDeflate: {
-      zlibDeflateOptions: {
-        chunkSize: 1024,
-        memLevel: 7,
-        level: 3
-      },
-      zlibInflateOptions: {
-        chunkSize: 10 * 1024
-      },
-      // Below options are defaults
-      serverNoContextTakeover: true, 
-      clientNoContextTakeover: true,
-      serverMaxWindowBits: 10,
-      concurrencyLimit: 10,
-      threshold: 1024
-    }
+    // Set a ping interval to keep connections alive
+    clientTracking: true
   });
 
   // Map to track active client connections and their bots
@@ -59,9 +42,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     clearInterval(pingInterval);
   });
 
-  wss.on('connection', (socket) => {
+  wss.on('connection', (socket, req) => {
     // Generate a unique client ID
     const clientId = nanoid();
+    
+    // Log the connection with IP info for debugging
+    const ip = req.socket.remoteAddress || 'unknown';
+    console.log(`New WebSocket client connected: ${clientId} from ${ip}`);
+    
+    // Send a welcome message to confirm the connection is working
+    try {
+      socket.send(JSON.stringify({
+        type: 'info',
+        message: 'WebSocket connection established'
+      }));
+    } catch (error) {
+      console.error('Error sending welcome message:', error);
+    }
     
     // Register client with bot manager
     botManager.registerClient(clientId, socket);
@@ -69,7 +66,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Store client information
     clients.set(clientId, { socket, clientId });
     
-    console.log(`New WebSocket client connected: ${clientId}`);
+    // Setup ping handler
+    socket.on('ping', () => {
+      try {
+        socket.pong();
+      } catch (error) {
+        console.error('Error sending pong:', error);
+      }
+    });
 
     socket.on('message', async (data) => {
       try {
