@@ -14,7 +14,7 @@ const ThemeContext = createContext<ThemeContextType>({
 
 export const useTheme = () => useContext(ThemeContext);
 
-export function ThemeProvider({ children }: { children: ReactNode }): JSX.Element {
+export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [theme, setTheme] = useState<Theme>(() => {
     // Check local storage first
     if (typeof window !== "undefined") {
@@ -49,4 +49,4 @@ export function ThemeProvider({ children }: { children: ReactNode }): JSX.Elemen
       {children}
     </ThemeContext.Provider>
   );
-}
+};

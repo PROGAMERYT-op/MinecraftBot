@@ -6,7 +6,7 @@ import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
 import ControlPanel from "@/pages/ControlPanel";
 import { WebSocketProvider } from "@/hooks/useWebSocket";
-import { ThemeProvider } from "./lib/theme";
+import { ThemeProvider } from "./lib/theme"; // Import ThemeProvider component
 
 function Router() {
   return (

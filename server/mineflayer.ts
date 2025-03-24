@@ -260,11 +260,11 @@ export class MinecraftBotManager {
         console.log(`Connection timeout for bot ${activeBot.name} to ${activeBot.server}:${activeBot.port}`);
         this.sendToClient(clientId, {
           type: 'error',
-          message: 'Connection timed out. Please check the server address and try again.'
+          message: 'Connection timed out. The Minecraft server might be offline or unreachable. Please check the server address and try again later.'
         });
         this.disconnectBot(botId);
       }
-    }, 30000); // 30 seconds timeout
+    }, 20000); // 20 seconds timeout - more responsive
     
     // Clear timeout when bot encounters an error
     bot.once('error', () => {
@@ -382,9 +382,22 @@ export class MinecraftBotManager {
         }
       }
       
+      // Provide more user-friendly error messages
+      let errorMessage = `Bot error: ${err.message}`;
+      
+      if (err.message.includes('ECONNREFUSED')) {
+        errorMessage = 'Connection refused. The Minecraft server is not accepting connections. Please verify the server is running and the address is correct.';
+      } else if (err.message.includes('ECONNRESET')) {
+        errorMessage = 'Connection reset by server. The Minecraft server may be offline or has forcibly closed the connection.';
+      } else if (err.message.includes('ETIMEDOUT')) {
+        errorMessage = 'Connection timed out. The Minecraft server may be offline or behind a firewall.';
+      } else if (err.message.includes('getaddrinfo')) {
+        errorMessage = 'Could not resolve server address. Please check the server IP and try again.';
+      }
+      
       this.sendToClient(clientId, {
         type: 'error',
-        message: `Bot error: ${err.message}`
+        message: errorMessage
       });
       
       this.disconnectBot(botId);

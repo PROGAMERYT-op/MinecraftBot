@@ -100,6 +100,7 @@ export default function ChatPanel({ messages, onSendMessage, botName }: ChatPane
         
         <form onSubmit={handleSubmit} className="flex">
           <Input 
+            ref={inputRef}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             placeholder="Type a message..." 
