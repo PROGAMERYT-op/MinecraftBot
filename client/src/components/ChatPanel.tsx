@@ -33,6 +33,7 @@ export default function ChatPanel({ messages, onSendMessage, botName }: ChatPane
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (inputValue.trim()) {
+      console.log('Sending chat message:', inputValue.trim());
       onSendMessage(inputValue.trim());
       setInputValue("");
       
