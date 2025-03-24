@@ -134,7 +134,7 @@ export default function Home() {
         toast({
           title: "Warning",
           description: "Could not send cancel message to server, but connection will be closed locally",
-          variant: "warning"
+          variant: "destructive" // Using destructive instead of warning which isn't a valid variant
         });
       }
     }
