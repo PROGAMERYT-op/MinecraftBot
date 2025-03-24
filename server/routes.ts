@@ -10,7 +10,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
 
   // Create WebSocket server on a separate path to avoid conflicts with Vite HMR
-  const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+  const wss = new WebSocketServer({ 
+    server: httpServer, 
+    path: '/ws',
+    // Enable automatic pings to keep connections alive
+    clientTracking: true,
+    // Keep connections alive with pings
+    perMessageDeflate: {
+      zlibDeflateOptions: {
+        chunkSize: 1024,
+        memLevel: 7,
+        level: 3
+      },
+      zlibInflateOptions: {
+        chunkSize: 10 * 1024
+      },
+      // Below options are defaults
+      serverNoContextTakeover: true, 
+      clientNoContextTakeover: true,
+      serverMaxWindowBits: 10,
+      concurrencyLimit: 10,
+      threshold: 1024
+    }
+  });
 
   // Map to track active client connections and their bots
   const clients = new Map<string, { 
@@ -18,6 +40,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     clientId: string,
     botId?: string 
   }>();
+  
+  // Interval to ping clients and keep connections alive
+  const pingInterval = setInterval(() => {
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        try {
+          client.ping();
+        } catch (error) {
+          console.error('Error pinging client:', error);
+        }
+      }
+    });
+  }, 30000); // Send a ping every 30 seconds
+  
+  // Clear ping interval on server close
+  httpServer.on('close', () => {
+    clearInterval(pingInterval);
+  });
 
   wss.on('connection', (socket) => {
     // Generate a unique client ID

@@ -37,25 +37,42 @@ export const WebSocketProvider = ({ children }: WebSocketProviderProps) => {
         socket.close();
       }
 
-      // Create new WebSocket connection
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${protocol}//${window.location.host}/ws`;
-      const newSocket = new WebSocket(wsUrl);
+      try {
+        // Create new WebSocket connection
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const wsUrl = `${protocol}//${window.location.host}/ws`;
+        console.log(`Connecting to WebSocket at ${wsUrl}`);
+        
+        const newSocket = new WebSocket(wsUrl);
+        
+        // Setup a connection timeout
+        const connectionTimeout = setTimeout(() => {
+          console.error('WebSocket connection timeout');
+          newSocket.close();
+          reject(new Error('Connection timeout'));
+        }, 10000); // 10 seconds timeout
 
-      newSocket.onopen = () => {
-        setSocket(newSocket);
-        resolve(newSocket);
-      };
+        newSocket.onopen = () => {
+          console.log('WebSocket connected successfully');
+          clearTimeout(connectionTimeout);
+          setSocket(newSocket);
+          resolve(newSocket);
+        };
 
-      newSocket.onerror = (error) => {
-        console.error('WebSocket connection error:', error);
+        newSocket.onerror = (error) => {
+          console.error('WebSocket connection error:', error);
+          clearTimeout(connectionTimeout);
+          reject(error);
+        };
+
+        newSocket.onclose = (event) => {
+          console.log('WebSocket connection closed:', event.code, event.reason);
+          setSocket(null);
+        };
+      } catch (error) {
+        console.error('Error creating WebSocket:', error);
         reject(error);
-      };
-
-      newSocket.onclose = (event) => {
-        console.log('WebSocket connection closed:', event.code, event.reason);
-        setSocket(null);
-      };
+      }
     });
   }, [socket]);
 
