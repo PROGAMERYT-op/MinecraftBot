@@ -10,7 +10,21 @@ import { ConnectionDetails } from "@/lib/types";
 const connectionSchema = z.object({
   botName: z.string().min(3, "Bot name must be at least 3 characters"),
   botCount: z.coerce.number().int().min(1).max(10, "Maximum 10 bots allowed"),
-  serverIp: z.string().regex(/^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(:[0-9]{1,5})?$/, "Enter a valid server address (e.g., play.example.com:25565)")
+  serverIp: z.string().min(1, "Server address is required").refine(
+    (value) => {
+      // Allow domain names with optional port
+      const domainRegex = /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(:[0-9]{1,5})?$/;
+      
+      // Allow IPv4 addresses with optional port
+      const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}(:[0-9]{1,5})?$/;
+      
+      // Allow localhost with optional port
+      const localhostRegex = /^localhost(:[0-9]{1,5})?$/;
+      
+      return domainRegex.test(value) || ipv4Regex.test(value) || localhostRegex.test(value);
+    },
+    { message: "Enter a valid server address (e.g., play.example.com:25565, 192.168.1.1:25565, or localhost:25565)" }
+  )
 });
 
 interface ConnectionFormProps {

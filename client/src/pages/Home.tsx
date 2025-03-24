@@ -16,39 +16,48 @@ export default function Home() {
   const handleConnection = async (details: ConnectionDetails) => {
     setConnectionDetails(details);
     setIsConnecting(true);
-    setConnectionStatus("Authenticating with Mojang servers...");
+    setConnectionStatus("Establishing WebSocket connection...");
     
     try {
-      await connect();
+      const webSocket = await connect();
       
-      // Steps to simulate connection process
-      setTimeout(() => setConnectionStatus("Establishing connection to server..."), 1000);
-      setTimeout(() => setConnectionStatus("Loading world data..."), 2000);
-      setTimeout(() => setConnectionStatus("Spawning bot(s)..."), 3000);
+      // Setup connection status updates
+      setConnectionStatus("Connecting to Minecraft server...");
+      
+      // Setup event handler for messages
+      const handleMessage = (event: MessageEvent) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log("Received websocket message:", data);
+          
+          if (data.type === 'connected') {
+            // Successfully connected, navigate to control panel
+            webSocket.removeEventListener('message', handleMessage);
+            setLocation('/control');
+          } else if (data.type === 'error') {
+            // Handle connection error
+            console.error("Connection error:", data.message);
+            setConnectionStatus(`Error: ${data.message}`);
+            setTimeout(() => setIsConnecting(false), 3000);
+            webSocket.removeEventListener('message', handleMessage);
+          }
+        } catch (error) {
+          console.error("Error parsing message:", error);
+        }
+      };
+      
+      // Add message event listener
+      webSocket.addEventListener('message', handleMessage);
       
       // Send connection details to server
-      setTimeout(() => {
-        if (socket) {
-          socket.send(JSON.stringify({
-            type: 'connect',
-            data: details
-          }));
-          
-          // Setup event handler for successful connection
-          const handleMessage = (event: MessageEvent) => {
-            const data = JSON.parse(event.data);
-            if (data.type === 'connected') {
-              socket.removeEventListener('message', handleMessage);
-              setLocation('/control');
-            }
-          };
-          
-          socket.addEventListener('message', handleMessage);
-        }
-      }, 4000);
+      webSocket.send(JSON.stringify({
+        type: 'connect',
+        data: details
+      }));
+      
     } catch (error) {
       console.error("WebSocket connection failed:", error);
-      setConnectionStatus("Connection failed. Please try again.");
+      setConnectionStatus("WebSocket connection failed. Please try again.");
       setTimeout(() => setIsConnecting(false), 2000);
     }
   };

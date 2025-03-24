@@ -50,6 +50,12 @@ export class MinecraftBotManager {
         port = parseInt(parts[1], 10);
       }
 
+      console.log(`Creating bot with parameters:`, {
+        host: server,
+        port,
+        username: botName
+      });
+
       // Create a unique bot ID
       const botId = `${botName}-${Date.now()}`;
       
@@ -59,23 +65,65 @@ export class MinecraftBotManager {
         server: serverAddress
       });
       
+      // Add proper error handling for connection issues
+      this.sendToClient(clientId, {
+        type: 'connected',
+        data: {
+          message: "Attempting to connect to server..."
+        }
+      });
+      
       // Create the bot with mineflayer
       const bot = mineflayer.createBot({
         host: server,
         port,
         username: botName,
         version: '1.20.1', // Default to latest version, could be configurable
-        auth: 'offline' // For connecting to offline-mode servers
+        auth: 'offline', // For connecting to offline-mode servers
+        viewDistance: 'tiny', // For performance
+        checkTimeoutInterval: 60 * 1000, // 1 minute timeout
+        logErrors: true 
       });
 
       // Set up event handlers
       bot.once('spawn', () => {
+        console.log(`Bot ${botName} has spawned successfully on ${server}:${port}`);
         this.sendToClient(clientId, {
           type: 'connected'
         });
         
         storage.updateBot(newBot.id, { connected: true });
       });
+      
+      // Add more detailed error handling
+      bot.once('login', () => {
+        console.log(`Bot ${botName} logged in to ${server}:${port}`);
+      });
+      
+      bot.on('end', (reason) => {
+        console.log(`Bot ${botName} disconnected: ${reason}`);
+        this.sendToClient(clientId, {
+          type: 'error',
+          message: `Bot disconnected: ${reason}`
+        });
+        this.disconnectBot(botId);
+      });
+      
+      // Add timeout handling in case connection takes too long
+      const connectionTimeout = setTimeout(() => {
+        if (this.activeBots.has(botId) && !bot.entity) {
+          console.log(`Connection timeout for bot ${botName} to ${server}:${port}`);
+          this.sendToClient(clientId, {
+            type: 'error',
+            message: 'Connection timed out. Please check the server address and try again.'
+          });
+          this.disconnectBot(botId);
+        }
+      }, 30000); // 30 seconds timeout
+      
+      // Clear timeout when bot spawns or encounters an error
+      bot.once('spawn', () => clearTimeout(connectionTimeout));
+      bot.once('error', () => clearTimeout(connectionTimeout));
 
       bot.on('health', () => {
         if (this.activeBots.has(botId)) {

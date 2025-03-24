@@ -14,7 +14,7 @@ const ThemeContext = createContext<ThemeContextType>({
 
 export const useTheme = () => useContext(ThemeContext);
 
-export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
     // Check local storage first
     if (typeof window !== "undefined") {
@@ -49,4 +49,4 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       {children}
     </ThemeContext.Provider>
   );
-};
+}

@@ -33,6 +33,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     socket.on('message', async (data) => {
       try {
+        console.log('Received message:', data.toString());
         const message = JSON.parse(data.toString()) as WebSocketMessage;
         const client = clients.get(clientId);
         
@@ -46,6 +47,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             // Validate connection details
             const validationResult = connectionSchema.safeParse(message.data);
             if (!validationResult.success) {
+              console.error('Invalid connection details:', validationResult.error);
               socket.send(JSON.stringify({
                 type: 'error',
                 message: 'Invalid connection details'
@@ -54,6 +56,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
 
             const { botName, botCount, serverIp } = message.data;
+            console.log(`Attempting to create bot: ${botName} on server ${serverIp}`);
             
             try {
               // Create bot and connect to server
