@@ -136,15 +136,19 @@ export class MinecraftBotManager {
     try {
       switch (action) {
         case 'forward':
+          bot.clearControlStates();
           bot.setControlState('forward', true);
           break;
         case 'backward':
+          bot.clearControlStates();
           bot.setControlState('back', true);
           break;
         case 'left':
+          bot.clearControlStates();
           bot.setControlState('left', true);
           break;
         case 'right':
+          bot.clearControlStates();
           bot.setControlState('right', true);
           break;
         case 'stop':
