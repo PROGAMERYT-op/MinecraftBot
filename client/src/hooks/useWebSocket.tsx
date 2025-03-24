@@ -190,7 +190,8 @@ export const WebSocketProvider = ({ children }: WebSocketProviderProps) => {
         
         // Resolve or reject any pending promises to prevent unhandled rejections
         if (connectPromiseRef.current) {
-          connectPromiseRef.current.reject(new Error(`WebSocket closed with code ${event.code}`));
+          connectPromiseRef.current.reject(new Error(`WebSocket closed with code ${event.code}`))
+            .catch(err => console.warn('WebSocket promise rejection:', err));
           connectPromiseRef.current = null;
         }
         

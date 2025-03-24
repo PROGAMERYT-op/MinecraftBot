@@ -331,9 +331,23 @@ export class MinecraftBotManager {
     });
 
     bot.on('kicked', (reason) => {
+      let kickReason = reason;
+      try {
+        if (typeof reason === 'object') {
+          // Handle translation objects from server
+          if (reason.translate && reason.with) {
+            kickReason = `${reason.translate}: ${reason.with.join(' ')}`;
+          } else {
+            kickReason = JSON.stringify(reason);
+          }
+        }
+      } catch (e) {
+        kickReason = 'Unknown kick reason';
+      }
+
       this.sendToClient(clientId, {
         type: 'error',
-        message: `Kicked from server: ${reason}`
+        message: `Kicked from server: ${kickReason}`
       });
       
       this.disconnectBot(botId);
